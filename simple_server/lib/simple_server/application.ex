@@ -12,7 +12,7 @@ defmodule SimpleServer.Application do
     dispatch_config = build_dispatch_config()
     {:ok, _} = :cowboy.start_clear(
       :http_listener,
-      [{:port, 8081}],
+      [{:port, 8082}],
       %{env: %{dispatch: dispatch_config}}
     )
 

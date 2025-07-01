@@ -2,7 +2,7 @@ defmodule SimpleServer.UdpServer do
   use GenServer
   require Logger
 
-  @port 8080
+  @port 8083
 
   def start_link(_) do
     GenServer.start_link(__MODULE__, [], name: __MODULE__)
@@ -102,8 +102,84 @@ defmodule SimpleServer.UdpServer do
     end
   end
 
+  defp handle_message(%{"type" => "test_message", "data" => data, "timestamp" => timestamp}, ip, port, state) do
+    Logger.info("Test message from #{inspect(ip)}:#{port}: #{data} (timestamp: #{timestamp})")
+    
+    # テストメッセージへの応答を送信
+    response = Jason.encode!(%{
+      type: "test_response", 
+      message: "Server received: #{data}",
+      server_time: System.system_time(:second)
+    })
+    :gen_udp.send(state.socket, ip, port, response)
+    
+    {:noreply, state}
+  end
+
+  defp handle_message(%{"type" => "ping", "timestamp" => timestamp}, ip, port, state) do
+    Logger.info("Ping from #{inspect(ip)}:#{port} (timestamp: #{timestamp})")
+    
+    # Pongメッセージを送信
+    response = Jason.encode!(%{
+      type: "pong", 
+      client_timestamp: timestamp,
+      server_timestamp: System.system_time(:second)
+    })
+    :gen_udp.send(state.socket, ip, port, response)
+    
+    {:noreply, state}
+  end
+
+  defp handle_message(%{"type" => "get_player_info", "player_id" => player_id}, ip, port, state) do
+    Logger.info("Player info request for #{player_id} from #{inspect(ip)}:#{port}")
+    
+    client_key = {ip, port}
+    client_info = Map.get(state.clients, client_key, %{})
+    
+    response = Jason.encode!(%{
+      type: "player_info_response",
+      player_id: player_id,
+      client_info: client_info,
+      connected_clients: map_size(state.clients)
+    })
+    :gen_udp.send(state.socket, ip, port, response)
+    
+    {:noreply, state}
+  end
+
+  defp handle_message(%{"type" => "get_game_state"}, ip, port, state) do
+    Logger.info("Game state request from #{inspect(ip)}:#{port}")
+    
+    response = Jason.encode!(%{
+      type: "game_state_response",
+      total_clients: map_size(state.clients),
+      clients: Enum.map(state.clients, fn {{client_ip, client_port}, client} ->
+        %{
+          ip: "#{:inet.ntoa(client_ip)}",
+          port: client_port,
+          player_id: client.player_id,
+          game_id: client.game_id,
+          team: client.team,
+          last_seen: client.last_seen
+        }
+      end)
+    })
+    :gen_udp.send(state.socket, ip, port, response)
+    
+    {:noreply, state}
+  end
+
   defp handle_message(message, ip, port, state) do
     Logger.warn("Unknown message type from #{inspect(ip)}:#{port}: #{inspect(message)}")
+    
+    # 不明なメッセージタイプへの応答
+    response = Jason.encode!(%{
+      type: "error",
+      message: "Unknown message type",
+      received: message
+    })
+    :gen_udp.send(state.socket, ip, port, response)
+    
     {:noreply, state}
   end
 

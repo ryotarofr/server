@@ -2,10 +2,11 @@ use bevy::prelude::*;
 use crate::resources::*;
 use crate::components::*;
 use serde_json::json;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use tokio::net::UdpSocket;
 use std::net::SocketAddr;
+use std::sync::Arc as StdArc;
 
 pub fn setup_udp_network(mut network_client: ResMut<NetworkClient>) {
     if network_client.connected {
@@ -28,7 +29,7 @@ pub fn setup_udp_network(mut network_client: ResMut<NetworkClient>) {
     });
 
     network_client.sender = Some(to_server_tx);
-    network_client.receiver = Some(from_server_rx);
+    network_client.receiver = Some(Arc::new(Mutex::new(from_server_rx)));
     network_client.connected = true;
 
     info!("UDP network connection established with player ID: {}", player_id);
@@ -41,7 +42,7 @@ async fn handle_udp_connection(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // UDPソケットをバインド（任意のポート）
     let socket = UdpSocket::bind("0.0.0.0:0").await?;
-    let server_addr: SocketAddr = "127.0.0.1:8080".parse()?;
+    let server_addr: SocketAddr = "127.0.0.1:8083".parse()?;
     
     println!("Connected to UDP server at {}", server_addr);
 
@@ -53,10 +54,13 @@ async fn handle_udp_connection(
         "team": "blue"
     });
     
-    socket.send_to(join_message.to_string().as_bytes(), &server_addr).await?;
-
-    // 送信タスク
-    let socket_send = socket.clone();
+    // 送信タスク用のソケットを作成
+    let socket_arc = StdArc::new(socket);
+    let socket_send = socket_arc.clone();
+    let socket_recv = socket_arc.clone();
+    
+    socket_arc.send_to(join_message.to_string().as_bytes(), &server_addr).await?;
+    
     let send_handle = tokio::spawn(async move {
         while let Ok(message) = to_server_rx.recv() {
             if let Err(e) = socket_send.send_to(message.as_bytes(), &server_addr).await {
@@ -71,7 +75,7 @@ async fn handle_udp_connection(
         let mut buffer = [0; 1024];
         
         loop {
-            match socket.recv_from(&mut buffer).await {
+            match socket_recv.recv_from(&mut buffer).await {
                 Ok((len, _addr)) => {
                     if let Ok(message) = String::from_utf8(buffer[..len].to_vec()) {
                         if let Err(e) = from_server_tx.send(message) {
@@ -157,37 +161,76 @@ pub fn send_shoot_action_udp(
 }
 
 pub fn handle_udp_messages(
-    mut network_client: ResMut<NetworkClient>,
-    mut game_state: ResMut<GameState>,
+    network_client: Res<NetworkClient>,
+    mut _game_state: ResMut<GameState>,
 ) {
     if let Some(receiver) = &network_client.receiver {
-        while let Ok(message) = receiver.try_recv() {
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&message) {
-                match parsed["type"].as_str() {
-                    Some("connected") => {
-                        info!("Successfully connected to server");
-                    }
-                    Some("game_state") => {
-                        info!("Received game state update");
-                        // ゲーム状態を更新
-                    }
-                    Some("player_update") => {
-                        if let Some(player_id) = parsed["player_id"].as_str() {
-                            if let (Some(x), Some(y)) = (
-                                parsed["position"]["x"].as_f64(),
-                                parsed["position"]["y"].as_f64()
-                            ) {
-                                info!("Player {} moved to ({}, {})", player_id, x, y);
-                                // 他のプレイヤーの位置を更新
+        if let Ok(receiver_guard) = receiver.try_lock() {
+            while let Ok(message) = receiver_guard.try_recv() {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&message) {
+                    match parsed["type"].as_str() {
+                        Some("connected") => {
+                            info!("✅ Successfully connected to server");
+                        }
+                        Some("test_response") => {
+                            if let Some(msg) = parsed["message"].as_str() {
+                                info!("🧪 Test response: {}", msg);
                             }
                         }
-                    }
-                    Some("paint_update") => {
-                        info!("Paint update received");
-                        // ペイント状態を更新
-                    }
-                    _ => {
-                        info!("Unknown message: {}", message);
+                        Some("pong") => {
+                            if let (Some(client_ts), Some(server_ts)) = (
+                                parsed["client_timestamp"].as_i64(),
+                                parsed["server_timestamp"].as_i64()
+                            ) {
+                                let rtt = server_ts - client_ts;
+                                info!("🏓 Pong received - RTT: {}ms", rtt * 1000);
+                            }
+                        }
+                        Some("player_info_response") => {
+                            if let Some(player_id) = parsed["player_id"].as_str() {
+                                let connected_clients = parsed["connected_clients"].as_i64().unwrap_or(0);
+                                info!("👤 Player Info - ID: {}, Connected clients: {}", player_id, connected_clients);
+                            }
+                        }
+                        Some("game_state_response") => {
+                            let total_clients = parsed["total_clients"].as_i64().unwrap_or(0);
+                            info!("🎮 Game State - Total clients: {}", total_clients);
+                            if let Some(clients) = parsed["clients"].as_array() {
+                                for client in clients {
+                                    if let (Some(ip), Some(port), Some(team)) = (
+                                        client["ip"].as_str(),
+                                        client["port"].as_i64(),
+                                        client["team"].as_str()
+                                    ) {
+                                        info!("  Client: {}:{} - Team: {}", ip, port, team);
+                                    }
+                                }
+                            }
+                        }
+                        Some("error") => {
+                            if let Some(error_msg) = parsed["message"].as_str() {
+                                warn!("❌ Server error: {}", error_msg);
+                            }
+                        }
+                        Some("game_state") => {
+                            info!("📊 Received game state update");
+                        }
+                        Some("player_update") => {
+                            if let Some(player_id) = parsed["player_id"].as_str() {
+                                if let (Some(x), Some(y)) = (
+                                    parsed["position"]["x"].as_f64(),
+                                    parsed["position"]["y"].as_f64()
+                                ) {
+                                    info!("🏃 Player {} moved to ({}, {})", player_id, x, y);
+                                }
+                            }
+                        }
+                        Some("paint_update") => {
+                            info!("🎨 Paint update received");
+                        }
+                        _ => {
+                            info!("❓ Unknown message: {}", message);
+                        }
                     }
                 }
             }
@@ -197,9 +240,73 @@ pub fn handle_udp_messages(
 
 // ネットワークの接続状態を監視
 pub fn monitor_connection(
-    network_client: Res<NetworkClient>,
-    time: Res<Time>,
+    _network_client: Res<NetworkClient>,
+    _time: Res<Time>,
 ) {
     // 定期的にpingメッセージを送信したり、接続状態をチェック
     // 実装は簡略化
+}
+
+// テスト用のリクエスト送信
+pub fn send_test_requests(
+    keyboard_input: Res<Input<KeyCode>>,
+    network_client: Res<NetworkClient>,
+) {
+    if let Some(sender) = &network_client.sender {
+        // Tキーでテストメッセージを送信
+        if keyboard_input.just_pressed(KeyCode::T) {
+            let test_message = json!({
+                "type": "test_message",
+                "data": "Hello from client!",
+                "timestamp": chrono::Utc::now().timestamp()
+            });
+            
+            if let Err(e) = sender.send(test_message.to_string()) {
+                warn!("Failed to send test message: {}", e);
+            } else {
+                info!("Sent test message to server");
+            }
+        }
+        
+        // Pキーでpingメッセージを送信
+        if keyboard_input.just_pressed(KeyCode::P) {
+            let ping_message = json!({
+                "type": "ping",
+                "timestamp": chrono::Utc::now().timestamp()
+            });
+            
+            if let Err(e) = sender.send(ping_message.to_string()) {
+                warn!("Failed to send ping: {}", e);
+            } else {
+                info!("Sent ping to server");
+            }
+        }
+        
+        // Iキーでプレイヤー情報リクエスト
+        if keyboard_input.just_pressed(KeyCode::I) {
+            let info_request = json!({
+                "type": "get_player_info",
+                "player_id": network_client.player_id.to_string()
+            });
+            
+            if let Err(e) = sender.send(info_request.to_string()) {
+                warn!("Failed to send info request: {}", e);
+            } else {
+                info!("Requested player info from server");
+            }
+        }
+        
+        // Gキーでゲーム状態リクエスト
+        if keyboard_input.just_pressed(KeyCode::G) {
+            let game_state_request = json!({
+                "type": "get_game_state"
+            });
+            
+            if let Err(e) = sender.send(game_state_request.to_string()) {
+                warn!("Failed to send game state request: {}", e);
+            } else {
+                info!("Requested game state from server");
+            }
+        }
+    }
 }

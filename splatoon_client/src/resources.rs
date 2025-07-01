@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{Receiver, Sender};
 use uuid::Uuid;
 
@@ -27,7 +28,7 @@ pub enum Team {
 #[derive(Resource)]
 pub struct NetworkClient {
     pub sender: Option<Sender<String>>,
-    pub receiver: Option<Receiver<String>>,
+    pub receiver: Option<Arc<Mutex<Receiver<String>>>>,
     pub player_id: Uuid,
     pub connected: bool,
 }

@@ -34,17 +34,26 @@ fn main() {
             camera_follow,
             handle_udp_messages,
             monitor_connection,
+            send_test_requests,
         ))
         .run();
 }
 
 fn setup(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
     // カメラ
     commands.spawn(Camera2dBundle::default());
+    
+    // テスト操作の説明をログに出力
+    info!("🎮 Game Controls:");
+    info!("  WASD/Arrow Keys - Move player");
+    info!("  Mouse Click - Shoot");
+    info!("🧪 Test Commands:");
+    info!("  T - Send test message to server");
+    info!("  P - Ping server");
+    info!("  I - Request player info");
+    info!("  G - Request game state");
 
     // プレイヤー
     commands.spawn((
