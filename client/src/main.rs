@@ -2,14 +2,14 @@ use bevy::prelude::*;
 use bevy::window::WindowPlugin;
 
 mod components;
-mod systems;
-mod resources;
 mod network;
+mod resources;
+mod systems;
 mod udp_network;
 
 use components::*;
-use systems::*;
 use resources::*;
+use systems::*;
 use udp_network::*;
 
 fn main() {
@@ -25,26 +25,27 @@ fn main() {
         .init_resource::<GameState>()
         .init_resource::<NetworkClient>()
         .add_systems(Startup, (setup, setup_udp_network))
-        .add_systems(Update, (
-            player_movement,
-            send_player_position_udp,
-            send_shoot_action_udp,
-            local_shooting,
-            paint_system,
-            camera_follow,
-            handle_udp_messages,
-            monitor_connection,
-            send_test_requests,
-        ))
+        .add_systems(
+            Update,
+            (
+                player_movement,
+                send_player_position_udp,
+                send_shoot_action_udp,
+                local_shooting,
+                paint_system,
+                camera_follow,
+                handle_udp_messages,
+                monitor_connection,
+                send_test_requests,
+            ),
+        )
         .run();
 }
 
-fn setup(
-    mut commands: Commands,
-) {
+fn setup(mut commands: Commands) {
     // カメラ
     commands.spawn(Camera2dBundle::default());
-    
+
     // テスト操作の説明をログに出力
     info!("🎮 Game Controls:");
     info!("  WASD/Arrow Keys - Move player");
@@ -57,7 +58,9 @@ fn setup(
 
     // プレイヤー
     commands.spawn((
-        Player { id: uuid::Uuid::new_v4() },
+        Player {
+            id: uuid::Uuid::new_v4(),
+        },
         SpriteBundle {
             sprite: Sprite {
                 color: Color::BLUE,

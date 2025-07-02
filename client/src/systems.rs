@@ -1,6 +1,6 @@
-use bevy::prelude::*;
 use crate::components::*;
 use crate::resources::*;
+use bevy::prelude::*;
 
 pub fn player_movement(
     keyboard_input: Res<Input<KeyCode>>,
@@ -9,7 +9,7 @@ pub fn player_movement(
 ) {
     for (mut transform, mut velocity) in player_query.iter_mut() {
         let mut direction = Vec2::ZERO;
-        
+
         if keyboard_input.pressed(KeyCode::W) || keyboard_input.pressed(KeyCode::Up) {
             direction.y += 1.0;
         }
@@ -48,12 +48,14 @@ pub fn local_shooting(
 
     let window = windows.single();
     let (camera, camera_transform) = camera_query.single();
-    
+
     if let Some(cursor_position) = window.cursor_position() {
-        if let Some(world_position) = camera.viewport_to_world_2d(camera_transform, cursor_position) {
+        if let Some(world_position) = camera.viewport_to_world_2d(camera_transform, cursor_position)
+        {
             for (player_transform, player) in player_query.iter() {
-                let direction = (world_position - player_transform.translation.truncate()).normalize();
-                
+                let direction =
+                    (world_position - player_transform.translation.truncate()).normalize();
+
                 // ローカルエフェクト用の弾丸を生成
                 commands.spawn((
                     Projectile {
@@ -80,15 +82,18 @@ pub fn local_shooting(
 pub fn paint_system(
     mut commands: Commands,
     mut projectile_query: Query<(Entity, &mut Transform, &Velocity, &mut Projectile)>,
-    mut ground_query: Query<(&mut PaintColor, &mut Sprite, &Transform), (With<PaintableGround>, Without<Projectile>)>,
+    mut ground_query: Query<
+        (&mut PaintColor, &mut Sprite, &Transform),
+        (With<PaintableGround>, Without<Projectile>),
+    >,
     time: Res<Time>,
 ) {
     for (entity, mut transform, velocity, mut projectile) in projectile_query.iter_mut() {
         transform.translation.x += velocity.0.x * time.delta_seconds();
         transform.translation.y += velocity.0.y * time.delta_seconds();
-        
+
         projectile.lifetime -= time.delta_seconds();
-        
+
         if projectile.lifetime <= 0.0 {
             commands.entity(entity).despawn();
             continue;
@@ -118,4 +123,3 @@ pub fn camera_follow(
         }
     }
 }
-
